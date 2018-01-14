@@ -63,6 +63,7 @@
 [[constraint]]
   name = "golang.org/x/net"
   source = "https://github.com/golang/net.git"
+  revision = "d1e1b351919c6738fdeb9893d5c998b161464f0c"
 
 [[constraint]]
   name = "google.golang.org/grpc"
