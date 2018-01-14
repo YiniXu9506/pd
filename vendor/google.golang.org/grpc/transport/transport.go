@@ -185,17 +185,14 @@ type Stream struct {
 	recvCompress string
 	sendCompress string
 	buf          *recvBuffer
-	trReader     io.Reader
+	dec          io.Reader
 	fc           *inFlow
 	recvQuota    uint32
-
-	// TODO: Remote this unused variable.
 	// The accumulated inbound quota pending for window update.
 	updateQuota uint32
-
-	// Callback to state application's intentions to read data. This
-	// is used to adjust flow control, if need be.
-	requestRead func(int)
+	// The handler to control the window update procedure for both this
+	// particular stream and the associated transport.
+	windowHandler func(int)
 
 	sendQuotaPool *quotaPool
 	// Close headerChan to indicate the end of reception of header metadata.
@@ -250,7 +247,7 @@ func (s *Stream) GoAway() <-chan struct{} {
 
 // Header acquires the key-value pairs of header metadata once it
 // is available. It blocks until i) the metadata is ready or ii) there is no
-// header metadata or iii) the stream is canceled/expired.
+// header metadata or iii) the stream is cancelled/expired.
 func (s *Stream) Header() (metadata.MD, error) {
 	select {
 	case <-s.ctx.Done():
@@ -323,35 +320,16 @@ func (s *Stream) write(m recvMsg) {
 	s.buf.put(&m)
 }
 
-// Read reads all p bytes from the wire for this stream.
-func (s *Stream) Read(p []byte) (n int, err error) {
-	// Don't request a read if there was an error earlier
-	if er := s.trReader.(*transportReader).er; er != nil {
-		return 0, er
-	}
-	s.requestRead(len(p))
-	return io.ReadFull(s.trReader, p)
-}
-
-// tranportReader reads all the data available for this Stream from the transport and
+// Read reads all the data available for this Stream from the transport and
 // passes them into the decoder, which converts them into a gRPC message stream.
 // The error is io.EOF when the stream is done or another non-nil error if
 // the stream broke.
-type transportReader struct {
-	reader io.Reader
-	// The handler to control the window update procedure for both this
-	// particular stream and the associated transport.
-	windowHandler func(int)
-	er            error
-}
-
-func (t *transportReader) Read(p []byte) (n int, err error) {
-	n, err = t.reader.Read(p)
+func (s *Stream) Read(p []byte) (n int, err error) {
+	n, err = s.dec.Read(p)
 	if err != nil {
-		t.er = err
 		return
 	}
-	t.windowHandler(n)
+	s.windowHandler(n)
 	return
 }
 
@@ -534,7 +512,7 @@ type ClientTransport interface {
 	// once the transport is initiated.
 	Error() <-chan struct{}
 
-	// GoAway returns a channel that is closed when ClientTransport
+	// GoAway returns a channel that is closed when ClientTranspor
 	// receives the draining signal from the server (e.g., GOAWAY frame in
 	// HTTP/2).
 	GoAway() <-chan struct{}
@@ -638,6 +616,17 @@ type StreamError struct {
 
 func (e StreamError) Error() string {
 	return fmt.Sprintf("stream error: code = %s desc = %q", e.Code, e.Desc)
+}
+
+// ContextErr converts the error from context package into a StreamError.
+func ContextErr(err error) StreamError {
+	switch err {
+	case context.DeadlineExceeded:
+		return streamErrorf(codes.DeadlineExceeded, "%v", err)
+	case context.Canceled:
+		return streamErrorf(codes.Canceled, "%v", err)
+	}
+	panic(fmt.Sprintf("Unexpected error from context packet: %v", err))
 }
 
 // wait blocks until it can receive from ctx.Done, closing, or proceed.

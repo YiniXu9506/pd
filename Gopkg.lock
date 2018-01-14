@@ -372,9 +372,8 @@
     "tap",
     "transport"
   ]
-  revision = "b15215fb911b24a5d61d57feec4233d610530464"
+  revision = "3419b42955675df23457629c75f58eb8dcd56954"
   source = "https://github.com/grpc/grpc-go.git"
-  version = "v1.4.2"
 
 [[projects]]
   name = "gopkg.in/natefinch/lumberjack.v2"
@@ -390,6 +389,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "cd80823f8bad39532647ae9ed104fb9d60229ba69c4867c2098032e2322d99e8"
+  inputs-digest = "344a88f6895823a2a4354106b42fa17b64b14b1c9a05372a4e7072007c3bad9b"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -61,11 +61,6 @@ import (
 	"google.golang.org/grpc/transport"
 )
 
-const (
-	defaultServerMaxReceiveMessageSize = 1024 * 1024 * 4
-	defaultServerMaxSendMessageSize    = 1024 * 1024 * 4
-)
-
 type methodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error)
 
 // MethodDesc represents an RPC service's method specification.
@@ -116,13 +111,12 @@ type options struct {
 	codec                 Codec
 	cp                    Compressor
 	dc                    Decompressor
+	maxMsgSize            int
 	unaryInt              UnaryServerInterceptor
 	streamInt             StreamServerInterceptor
 	inTapHandle           tap.ServerInHandle
 	statsHandler          stats.Handler
 	maxConcurrentStreams  uint32
-	maxReceiveMessageSize int
-	maxSendMessageSize    int
 	useHandlerImpl        bool // use http.Handler-based server
 	unknownStreamDesc     *StreamDesc
 	keepaliveParams       keepalive.ServerParameters
@@ -131,10 +125,7 @@ type options struct {
 	initialConnWindowSize int32
 }
 
-var defaultServerOptions = options{
-	maxReceiveMessageSize: defaultServerMaxReceiveMessageSize,
-	maxSendMessageSize:    defaultServerMaxSendMessageSize,
-}
+var defaultMaxMsgSize = 1024 * 1024 * 4 // use 4MB as the default message size limit
 
 // A ServerOption sets options such as credentials, codec and keepalive parameters, etc.
 type ServerOption func(*options)
@@ -190,25 +181,11 @@ func RPCDecompressor(dc Decompressor) ServerOption {
 	}
 }
 
-// MaxMsgSize returns a ServerOption to set the max message size in bytes the server can receive.
-// If this is not set, gRPC uses the default limit. Deprecated: use MaxRecvMsgSize instead.
+// MaxMsgSize returns a ServerOption to set the max message size in bytes for inbound mesages.
+// If this is not set, gRPC uses the default 4MB.
 func MaxMsgSize(m int) ServerOption {
-	return MaxRecvMsgSize(m)
-}
-
-// MaxRecvMsgSize returns a ServerOption to set the max message size in bytes the server can receive.
-// If this is not set, gRPC uses the default 4MB.
-func MaxRecvMsgSize(m int) ServerOption {
 	return func(o *options) {
-		o.maxReceiveMessageSize = m
-	}
-}
-
-// MaxSendMsgSize returns a ServerOption to set the max message size in bytes the server can send.
-// If this is not set, gRPC uses the default 4MB.
-func MaxSendMsgSize(m int) ServerOption {
-	return func(o *options) {
-		o.maxSendMessageSize = m
+		o.maxMsgSize = m
 	}
 }
 
@@ -289,7 +266,8 @@ func UnknownServiceHandler(streamHandler StreamHandler) ServerOption {
 // NewServer creates a gRPC server which has no service registered and has not
 // started to accept requests yet.
 func NewServer(opt ...ServerOption) *Server {
-	opts := defaultServerOptions
+	var opts options
+	opts.maxMsgSize = defaultMaxMsgSize
 	for _, o := range opt {
 		o(&opts)
 	}
@@ -467,12 +445,10 @@ func (s *Server) Serve(lis net.Listener) error {
 				s.mu.Lock()
 				s.printf("Accept error: %v; retrying in %v", err, tempDelay)
 				s.mu.Unlock()
-				timer := time.NewTimer(tempDelay)
 				select {
-				case <-timer.C:
+				case <-time.After(tempDelay):
 				case <-s.ctx.Done():
 				}
-				timer.Stop()
 				continue
 			}
 			s.mu.Lock()
@@ -664,11 +640,14 @@ func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Str
 	}
 	p, err := encode(s.opts.codec, msg, cp, cbuf, outPayload)
 	if err != nil {
-		grpclog.Println("grpc: server failed to encode response: ", err)
-		return err
-	}
-	if len(p) > s.opts.maxSendMessageSize {
-		return status.Errorf(codes.ResourceExhausted, "grpc: trying to send message larger than max (%d vs. %d)", len(p), s.opts.maxSendMessageSize)
+		// This typically indicates a fatal issue (e.g., memory
+		// corruption or hardware faults) the application program
+		// cannot handle.
+		//
+		// TODO(zhaoq): There exist other options also such as only closing the
+		// faulty stream locally and remotely (Other streams can keep going). Find
+		// the optimal option.
+		grpclog.Fatalf("grpc: Server failed to encode response %v", err)
 	}
 	err = t.Write(stream, p, opts)
 	if err == nil && outPayload != nil {
@@ -711,7 +690,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		stream.SetSendCompress(s.opts.cp.Type())
 	}
 	p := &parser{r: stream}
-	pf, req, err := p.recvMsg(s.opts.maxReceiveMessageSize)
+	pf, req, err := p.recvMsg(s.opts.maxMsgSize)
 	if err == io.EOF {
 		// The entire stream is done (for unary RPC only).
 		return err
@@ -769,10 +748,10 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 				return Errorf(codes.Internal, err.Error())
 			}
 		}
-		if len(req) > s.opts.maxReceiveMessageSize {
+		if len(req) > s.opts.maxMsgSize {
 			// TODO: Revisit the error code. Currently keep it consistent with
 			// java implementation.
-			return status.Errorf(codes.ResourceExhausted, "grpc: received message larger than max (%d vs. %d)", len(req), s.opts.maxReceiveMessageSize)
+			return status.Errorf(codes.Internal, "grpc: server received a message of %d bytes exceeding %d limit", len(req), s.opts.maxMsgSize)
 		}
 		if err := s.opts.codec.Unmarshal(req, v); err != nil {
 			return status.Errorf(codes.Internal, "grpc: error unmarshalling request: %v", err)
@@ -865,16 +844,15 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 		stream.SetSendCompress(s.opts.cp.Type())
 	}
 	ss := &serverStream{
-		t:     t,
-		s:     stream,
-		p:     &parser{r: stream},
-		codec: s.opts.codec,
-		cp:    s.opts.cp,
-		dc:    s.opts.dc,
-		maxReceiveMessageSize: s.opts.maxReceiveMessageSize,
-		maxSendMessageSize:    s.opts.maxSendMessageSize,
-		trInfo:                trInfo,
-		statsHandler:          sh,
+		t:            t,
+		s:            stream,
+		p:            &parser{r: stream},
+		codec:        s.opts.codec,
+		cp:           s.opts.cp,
+		dc:           s.opts.dc,
+		maxMsgSize:   s.opts.maxMsgSize,
+		trInfo:       trInfo,
+		statsHandler: sh,
 	}
 	if ss.cp != nil {
 		ss.cbuf = new(bytes.Buffer)
@@ -949,7 +927,7 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 			trInfo.tr.SetError()
 		}
 		errDesc := fmt.Sprintf("malformed method name: %q", stream.Method())
-		if err := t.WriteStatus(stream, status.New(codes.ResourceExhausted, errDesc)); err != nil {
+		if err := t.WriteStatus(stream, status.New(codes.InvalidArgument, errDesc)); err != nil {
 			if trInfo != nil {
 				trInfo.tr.LazyLog(&fmtStringer{"%v", []interface{}{err}}, true)
 				trInfo.tr.SetError()

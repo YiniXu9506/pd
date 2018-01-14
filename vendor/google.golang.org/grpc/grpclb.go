@@ -745,9 +745,6 @@ func (b *balancer) Notify() <-chan []Address {
 func (b *balancer) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.done {
-		return errBalancerClosed
-	}
 	b.done = true
 	if b.expTimer != nil {
 		b.expTimer.Stop()

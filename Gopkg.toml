@@ -68,7 +68,8 @@
 [[constraint]]
   name = "google.golang.org/grpc"
   source = "https://github.com/grpc/grpc-go.git"
-  version = "1.4.2"
+  revision = "3419b42955675df23457629c75f58eb8dcd56954"
+  # version = "1.4.2"
 
 [[constraint]]
   name = "gopkg.in/natefinch/lumberjack.v2"
