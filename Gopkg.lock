@@ -327,7 +327,6 @@
     "trace"
   ]
   revision = "d1e1b351919c6738fdeb9893d5c998b161464f0c"
-  source = "https://github.com/golang/net.git"
 
 [[projects]]
   name = "golang.org/x/sys"
@@ -373,7 +372,6 @@
     "transport"
   ]
   revision = "3419b42955675df23457629c75f58eb8dcd56954"
-  source = "https://github.com/grpc/grpc-go.git"
 
 [[projects]]
   name = "gopkg.in/natefinch/lumberjack.v2"
@@ -389,6 +387,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "344a88f6895823a2a4354106b42fa17b64b14b1c9a05372a4e7072007c3bad9b"
+  inputs-digest = "9c4a6d175747e4340193bd76c0a1da79becbc8197af4b292146541b7f340874f"
   solver-name = "gps-cdcl"
   solver-version = 1

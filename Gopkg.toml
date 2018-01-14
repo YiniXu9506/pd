@@ -60,16 +60,16 @@
   name = "github.com/spf13/pflag"
   version = "1.0.0"
 
-[[constraint]]
-  name = "golang.org/x/net"
-  source = "https://github.com/golang/net.git"
-  revision = "d1e1b351919c6738fdeb9893d5c998b161464f0c"
+# [[constraint]]
+#   name = "golang.org/x/net"
+#   source = "https://github.com/golang/net.git"
+#   revision = "d1e1b351919c6738fdeb9893d5c998b161464f0c"
 
-[[constraint]]
-  name = "google.golang.org/grpc"
-  source = "https://github.com/grpc/grpc-go.git"
-  revision = "3419b42955675df23457629c75f58eb8dcd56954"
-  # version = "1.4.2"
+# [[constraint]]
+#   name = "google.golang.org/grpc"
+#   source = "https://github.com/grpc/grpc-go.git"
+#   revision = "3419b42955675df23457629c75f58eb8dcd56954"
+#   version = "1.4.2"
 
 [[constraint]]
   name = "gopkg.in/natefinch/lumberjack.v2"
